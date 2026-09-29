@@ -4,7 +4,7 @@
 const path = require('path');
 const QRCode = require('qrcode');
 const { c, log, ask, findFreePort, openBrowser, checkPackagerStatus, sleep } = require('../src/utils');
-const { ensureCloudflared, startQuickTunnel } = require('../src/cloudflared');
+const { ensureCloudflared, startQuickTunnel, cloudflareEdgeReachable } = require('../src/cloudflared');
 const { findExpoProject, findLocalExpoCli, startExpo, getExpoUser, runExpoAuth } = require('../src/expo');
 const { startDashboard } = require('../src/dashboard');
 const { ensureNgrokModulePaths } = require('../src/ngrok');
@@ -184,6 +184,11 @@ async function main() {
     state.ngrok = true;
     runWithNgrok(metroPort);
   };
+
+  if (!(await cloudflareEdgeReachable())) {
+    fallBackToNgrok('Bu ağ Cloudflare tünelinin portunu (7844) engelliyor.');
+    return;
+  }
 
   let bin;
   try {

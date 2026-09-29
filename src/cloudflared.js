@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('fs');
+const tls = require('tls');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
@@ -91,6 +92,38 @@ async function ensureCloudflared() {
 }
 
 /**
+ * Tünel sunucusuyla gerçek bir TLS el sıkışması dener. Sadece TCP bağlantısına bakmak yetmiyor:
+ * bazı ağlar/güvenlik yazılımları her porta TCP bağlantısını kabul edip sonra trafiği düşürüyor.
+ * Sertifikada Cloudflare görülmezse (araya giren bir proxy varsa) cloudflared de bağlanamaz.
+ */
+function edgeHandshakeOk(host, timeoutMs) {
+  return new Promise((resolve) => {
+    const socket = tls.connect({ host, port: 7844, servername: 'h2.cftunnel.com', rejectUnauthorized: false, ALPNProtocols: ['h2'] });
+    const done = (ok) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('secureConnect', () => {
+      const cert = socket.getPeerCertificate();
+      done(/cloudflare/i.test(JSON.stringify((cert && cert.subject) || {})));
+    });
+    socket.once('error', () => done(false));
+  });
+}
+
+/**
+ * Cloudflare tünel sunucularına (7844 portu) birkaç saniyede ulaşılabiliyor mu?
+ * Okul/şirket ağları bu portu kapatınca tünel denemeleri boşuna ~40 sn sürüyordu;
+ * bu kontrol sayesinde doğrudan ngrok'a geçilir (cloudflared de indirilmez).
+ */
+async function cloudflareEdgeReachable(timeoutMs = 4000) {
+  const hosts = ['region1.v2.argotunnel.com', 'region2.v2.argotunnel.com'];
+  const results = await Promise.all(hosts.map((h) => edgeHandshakeOk(h, timeoutMs)));
+  return results.some(Boolean);
+}
+
+/**
  * Hesap gerektirmeyen bir Cloudflare "quick tunnel" açar ve genel HTTPS adresini döndürür.
  * Dönen `url` telefonun her yerden erişebileceği adrestir (ör. https://kelime-kelime.trycloudflare.com).
  */
@@ -142,4 +175,4 @@ function startQuickTunnel(bin, localPort, { onLog, protocol = 'http2', timeoutMs
   return { child, ready };
 }
 
-module.exports = { ensureCloudflared, startQuickTunnel };
+module.exports = { ensureCloudflared, startQuickTunnel, cloudflareEdgeReachable };

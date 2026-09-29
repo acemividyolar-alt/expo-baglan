@@ -135,13 +135,32 @@ async function main() {
   }
 
   // --- ngrok modu: Expo'nun kendi tüneline aynen devret ---
-  const runWithNgrok = (port) => {
-    log.info("Expo'nun ngrok tüneli kullanılıyor. Bu modda Expo'nun terminalde bastığı QR kodu doğrudur.");
+  const runWithNgrok = (port, attempt = 1) => {
+    if (attempt === 1) log.info("Expo'nun ngrok tüneli kullanılıyor. Bu modda Expo'nun terminalde bastığı QR kodu doğrudur.");
     const nodePaths = ensureNgrokModulePaths();
+    const startedAt = Date.now();
     const expo = track(
       startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra, nodePaths })
     );
-    expo.on('exit', (code) => process.exit(code ?? 0));
+    expo.on('exit', (code, signal) => {
+      // Expo, ngrok'a sabit 10 sn tanıyor ve zaman aşımında tekrar denemiyor. Açılışta hatayla
+      // kapandıysa (ör. "ngrok tunnel took too long to connect") bir kez daha denenir: yeni indirilen
+      // ngrok.exe'nin ilk çalıştırmada antivirüs taramasına takılması bu süreyi aşabiliyor.
+      const failedEarly = code && !signal && Date.now() - startedAt < 90000;
+      if (failedEarly && attempt === 1) {
+        log.warn('ngrok bağlanamadı, bir kez daha deneniyor...');
+        runWithNgrok(port, 2);
+        return;
+      }
+      if (failedEarly) {
+        log.warn('ngrok tüneli de kurulamadı. Bu ağ tünel servislerini (Cloudflare, ngrok) engelliyor olabilir.');
+        log.info('Seçenekler:');
+        log.info("  - Telefonu bilgisayarla aynı ağa bağlayın (ör. okulun Wi-Fi'ı) ve normal 'npx expo start' kullanın; tünel gerekmez.");
+        log.info('  - Ağ yöneticinizden / hocanızdan Expo tüneli (*.exp.direct, ngrok) için izin isteyin.');
+        log.info("  - Tünel gerektirmeyenler: tarayıcıda önizleme ('npx expo start' sonra 'w') ya da Android emülatörü.");
+      }
+      process.exit(code ?? 0);
+    });
     expo.on('error', (err) => {
       log.error(`Expo başlatılamadı: ${err.message}`);
       process.exit(1);

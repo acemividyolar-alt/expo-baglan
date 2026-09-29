@@ -90,10 +90,15 @@ async function main() {
   }
 
   // --- ngrok modu: Expo'nun kendi tüneline aynen devret ---
-  if (opts.ngrok) {
+  const runWithNgrok = (port) => {
     log.info("Expo'nun ngrok tüneli kullanılıyor. Bu modda Expo'nun terminalde bastığı QR kodu doğrudur.");
-    const expo = startExpo({ projectRoot: project.root, cli: expoCli.cli, port: opts.port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra });
+    log.info(c.dim('@expo/ngrok paketini kurmak isteyip istemediğiniz sorulursa "y" yazıp Enter\'a basın.'));
+    const expo = startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra });
     expo.on('exit', (code) => process.exit(code ?? 0));
+  };
+
+  if (opts.ngrok) {
+    runWithNgrok(opts.port);
     return;
   }
 
@@ -120,26 +125,46 @@ async function main() {
   log.info(`Kontrol paneli: ${c.cyan(dashUrl)}`);
   if (opts.browser) openBrowser(dashUrl);
 
+  const fallBackToNgrok = (reason) => {
+    log.warn(reason);
+    log.warn("Expo'nun ngrok tüneline geçiliyor (443 portunu kullanır, kısıtlı ağlarda genelde açıktır)...");
+    dashboard.close();
+    runWithNgrok(metroPort);
+  };
+
   let bin;
   try {
     bin = await ensureCloudflared();
   } catch (err) {
-    state.error = err.message;
-    log.error(err.message);
-    log.info(`Alternatif olarak Expo'nun kendi tünelini deneyin: ${c.cyan('expo-baglan --ngrok')}`);
-    dashboard.close();
-    process.exitCode = 1;
+    fallBackToNgrok(`cloudflared hazırlanamadı: ${err.message}`);
     return;
   }
 
-  log.info('Cloudflare tüneli açılıyor (hesap gerekmez)...');
   const recent = [];
-  const tunnel = startQuickTunnel(bin, metroPort, {
-    onLog: (line) => {
-      recent.push(line);
-      if (recent.length > 25) recent.shift();
-    },
-  });
+  const onLog = (line) => {
+    recent.push(line);
+    if (recent.length > 25) recent.shift();
+  };
+
+  // Önce TCP (http2), olmazsa UDP (quic) denenir; okul/şirket ağları çoğunlukla UDP'yi engeller.
+  let tunnel = null;
+  for (const protocol of ['http2', 'quic']) {
+    log.info(`Cloudflare tüneli açılıyor (${protocol === 'http2' ? 'TCP' : 'UDP/QUIC'}, hesap gerekmez)...`);
+    tunnel = startQuickTunnel(bin, metroPort, { onLog, protocol, timeoutMs: 30000 });
+    try {
+      state.publicUrl = await tunnel.ready;
+      break;
+    } catch (err) {
+      tunnel.child.kill();
+      log.warn(err.message);
+    }
+  }
+
+  if (!state.publicUrl) {
+    if (recent.length) console.error(c.dim(recent.slice(-6).join('\n')));
+    fallBackToNgrok('Bu ağ Cloudflare tünelini engelliyor gibi görünüyor (7844 portu kapalı olabilir).');
+    return;
+  }
 
   let expo = null;
   let shuttingDown = false;
@@ -159,17 +184,6 @@ async function main() {
 
   process.on('SIGINT', () => shutdown(0));
   process.on('SIGTERM', () => shutdown(0));
-
-  try {
-    state.publicUrl = await tunnel.ready;
-  } catch (err) {
-    state.error = err.message;
-    log.error(err.message);
-    if (recent.length) console.error(c.dim(recent.slice(-10).join('\n')));
-    log.info(`Alternatif olarak Expo'nun kendi tünelini deneyin: ${c.cyan('expo-baglan --ngrok')}`);
-    shutdown(1);
-    return;
-  }
 
   const host = new URL(state.publicUrl).host;
   state.expoUrl = `exps://${host}`;

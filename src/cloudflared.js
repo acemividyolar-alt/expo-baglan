@@ -96,8 +96,9 @@ async function ensureCloudflared() {
  * Hesap gerektirmeyen bir Cloudflare "quick tunnel" açar ve genel HTTPS adresini döndürür.
  * Dönen `url` telefonun her yerden erişebileceği adrestir (ör. https://kelime-kelime.trycloudflare.com).
  */
-function startQuickTunnel(bin, localPort, { onLog } = {}) {
-  const args = ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${localPort}`];
+function startQuickTunnel(bin, localPort, { onLog, protocol = 'http2', timeoutMs = 30000 } = {}) {
+  // http2 (TCP 7844) okul/şirket ağlarında QUIC'ten (UDP 7844) daha sık açıktır.
+  const args = ['tunnel', '--no-autoupdate', '--protocol', protocol, '--url', `http://127.0.0.1:${localPort}`];
   const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 
   const ready = new Promise((resolve, reject) => {
@@ -105,8 +106,8 @@ function startQuickTunnel(bin, localPort, { onLog } = {}) {
     let registered = false;
     let buffer = '';
     const timer = setTimeout(() => {
-      reject(new Error('Cloudflare tüneli 60 saniye içinde açılamadı. İnternet bağlantınızı veya güvenlik duvarını kontrol edin.'));
-    }, 60000);
+      reject(new Error(`Cloudflare tüneli ${Math.round(timeoutMs / 1000)} saniye içinde açılamadı (${protocol}).`));
+    }, timeoutMs);
 
     const done = () => {
       if (url && registered) {

@@ -49,7 +49,7 @@ function findLocalExpoCli(projectRoot) {
  * `expo start`'ı çalıştırır. Terminal girişi/çıkışı doğrudan Expo'ya bağlı olduğu için
  * r (yenile), j (debugger), ? gibi Expo kısayolları normal şekilde çalışır.
  */
-function startExpo({ projectRoot, cli, port, proxyUrl, useNgrok, clear, extraArgs }) {
+function startExpo({ projectRoot, cli, port, proxyUrl, useNgrok, clear, extraArgs, nodePaths = [] }) {
   const args = ['start', '--port', String(port), '--go'];
   if (useNgrok) args.push('--tunnel');
   if (clear) args.push('--clear');
@@ -61,6 +61,9 @@ function startExpo({ projectRoot, cli, port, proxyUrl, useNgrok, clear, extraArg
     env.EXPO_PACKAGER_PROXY_URL = proxyUrl;
   } else {
     delete env.EXPO_PACKAGER_PROXY_URL;
+  }
+  if (nodePaths.length) {
+    env.NODE_PATH = [...nodePaths, env.NODE_PATH].filter(Boolean).join(path.delimiter);
   }
 
   return spawn(process.execPath, [cli, ...args], { cwd: projectRoot, env, stdio: 'inherit' });

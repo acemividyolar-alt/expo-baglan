@@ -7,6 +7,7 @@ const { c, log, findFreePort, openBrowser, checkPackagerStatus, sleep } = requir
 const { ensureCloudflared, startQuickTunnel } = require('../src/cloudflared');
 const { findExpoProject, findLocalExpoCli, startExpo, getExpoUser } = require('../src/expo');
 const { startDashboard } = require('../src/dashboard');
+const { ensureNgrokModulePaths } = require('../src/ngrok');
 
 // Başlatılan tüm alt süreçler (cloudflared, Expo). Araç hangi yoldan kapanırsa kapansın
 // (hata, process.exit, terminal kapatma) arkada yetim cloudflared kalmasın diye öldürülür.
@@ -111,8 +112,10 @@ async function main() {
   // --- ngrok modu: Expo'nun kendi tüneline aynen devret ---
   const runWithNgrok = (port) => {
     log.info("Expo'nun ngrok tüneli kullanılıyor. Bu modda Expo'nun terminalde bastığı QR kodu doğrudur.");
-    log.info(c.dim('@expo/ngrok paketini kurmak isteyip istemediğiniz sorulursa "y" yazıp Enter\'a basın.'));
-    const expo = track(startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra }));
+    const nodePaths = ensureNgrokModulePaths();
+    const expo = track(
+      startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra, nodePaths })
+    );
     expo.on('exit', (code) => process.exit(code ?? 0));
     expo.on('error', (err) => {
       log.error(`Expo başlatılamadı: ${err.message}`);

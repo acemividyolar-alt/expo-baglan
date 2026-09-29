@@ -1,14 +1,12 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
-const { c, log } = require('./utils');
+const { TOOL_DIR, c, log } = require('./utils');
 
-const TOOL_DIR = path.join(os.homedir(), '.expo-baglan');
 const BIN_NAME = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
 const LOCAL_BIN = path.join(TOOL_DIR, BIN_NAME);
 const RELEASE_BASE = 'https://github.com/cloudflare/cloudflared/releases/latest/download/';

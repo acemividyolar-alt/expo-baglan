@@ -1,10 +1,15 @@
 'use strict';
 
 const net = require('net');
+const os = require('os');
+const path = require('path');
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
 const { spawn } = require('child_process');
+
+/** Aracın indirdiği/kurduğu şeylerin (cloudflared, @expo/ngrok) durduğu klasör. */
+const TOOL_DIR = path.join(os.homedir(), '.expo-baglan');
 
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code) => (s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : String(s));
@@ -129,4 +134,4 @@ function checkPackagerStatus(baseUrl, timeoutMs = 8000) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-module.exports = { c, log, findFreePort, openBrowser, checkPackagerStatus, sleep };
+module.exports = { TOOL_DIR, c, log, findFreePort, openBrowser, checkPackagerStatus, sleep };

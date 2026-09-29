@@ -2,6 +2,7 @@
 
 const net = require('net');
 const os = require('os');
+const readline = require('readline');
 const path = require('path');
 const dns = require('dns');
 const http = require('http');
@@ -33,6 +34,17 @@ const log = {
   warn: (msg) => console.log(`${PREFIX} ${c.yellow('!')} ${c.yellow(msg)}`),
   error: (msg) => console.error(`${PREFIX} ${c.red('✖')} ${c.red(msg)}`),
 };
+
+/** Terminalde soru sorar; readline kapatılır ki stdin sonra Expo'ya temiz şekilde devredilsin. */
+function ask(question) {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(`${PREFIX} ${question}`, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
 
 /**
  * Port boş mu? Windows'ta 0.0.0.0'a bağlanmak, başka bir sürecin 127.0.0.1'de aynı portu
@@ -134,4 +146,4 @@ function checkPackagerStatus(baseUrl, timeoutMs = 8000) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-module.exports = { TOOL_DIR, c, log, findFreePort, openBrowser, checkPackagerStatus, sleep };
+module.exports = { TOOL_DIR, c, log, ask, findFreePort, openBrowser, checkPackagerStatus, sleep };

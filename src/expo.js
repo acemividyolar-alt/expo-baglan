@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 
 /** Verilen klasörden yukarı doğru, bağımlılıklarında "expo" olan package.json'u arar. */
 function findExpoProject(startDir) {
@@ -89,4 +89,13 @@ function getExpoUser(projectRoot, cli) {
   });
 }
 
-module.exports = { findExpoProject, findLocalExpoCli, startExpo, getExpoUser };
+/**
+ * `expo login` veya `expo logout`'u bu terminalde çalıştırır. Kullanıcı adı ve şifreyi
+ * Expo CLI kendisi sorar; bu araç kimlik bilgilerini hiç görmez.
+ */
+function runExpoAuth(projectRoot, cli, command) {
+  const r = spawnSync(process.execPath, [cli, command], { cwd: projectRoot, stdio: 'inherit' });
+  return r.status === 0;
+}
+
+module.exports = { findExpoProject, findLocalExpoCli, startExpo, getExpoUser, runExpoAuth };

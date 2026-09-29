@@ -3,9 +3,9 @@
 
 const path = require('path');
 const QRCode = require('qrcode');
-const { c, log, findFreePort, openBrowser, checkPackagerStatus, sleep } = require('../src/utils');
+const { c, log, ask, findFreePort, openBrowser, checkPackagerStatus, sleep } = require('../src/utils');
 const { ensureCloudflared, startQuickTunnel } = require('../src/cloudflared');
-const { findExpoProject, findLocalExpoCli, startExpo, getExpoUser } = require('../src/expo');
+const { findExpoProject, findLocalExpoCli, startExpo, getExpoUser, runExpoAuth } = require('../src/expo');
 const { startDashboard } = require('../src/dashboard');
 const { ensureNgrokModulePaths } = require('../src/ngrok');
 
@@ -39,12 +39,15 @@ ${c.bold('Seçenekler:')}
   --ngrok         Cloudflare'ı denemeden doğrudan Expo'nun ngrok tünelini kullan (expo start --tunnel)
                   (Cloudflare ağda engelliyse zaten otomatik olarak ngrok'a geçilir)
   --no-browser    Kontrol panelini tarayıcıda otomatik açma
+  --login         Başlamadan önce Expo hesabına giriş yap / hesap değiştir
+  --logout        Bu bilgisayardaki Expo hesabından çıkış yap ve kapat (ortak bilgisayarlar için)
   -h, --help      Bu yardımı göster
 
 ${c.bold('Örnekler:')}
   expo-baglan                      (VS Code terminalinde, proje klasöründeyken)
   expo-baglan C:\\projeler\\uygulamam
   expo-baglan -c
+  expo-baglan --logout             (lab bilgisayarında iş bitince)
 `;
 
 function parseArgs(argv) {
@@ -58,6 +61,8 @@ function parseArgs(argv) {
     else if (a === '-c' || a === '--clear') opts.clear = true;
     else if (a === '--ngrok') opts.ngrok = true;
     else if (a === '--no-browser') opts.browser = false;
+    else if (a === '--login') opts.login = true;
+    else if (a === '--logout') opts.logout = true;
     else if (a === '--port') {
       opts.port = Number(argv[++i]);
       if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535) throw new Error('--port geçerli bir sayı olmalı.');
@@ -98,15 +103,35 @@ async function main() {
   const sdkMajor = expoCli.version.split('.')[0];
   log.info(`Proje: ${c.bold(project.pkg.name || path.basename(project.root))}  ${c.dim(`(Expo SDK ${sdkMajor}, ${project.root})`)}`);
 
+  if (opts.logout) {
+    if (runExpoAuth(project.root, expoCli.cli, 'logout')) log.ok('Bu bilgisayardaki Expo hesabından çıkış yapıldı.');
+    else process.exitCode = 1;
+    return;
+  }
+
   // SDK 57+: iPhone'daki Expo Go, CLI ve uygulama aynı Expo hesabıyla giriş yapmadan projeyi açmıyor.
+  // Giriş yoksa (ya da --login verildiyse) Expo'nun kendi giriş ekranı burada açılır.
   const loginRequired = Number(sdkMajor) >= 57;
-  const expoUser = loginRequired ? await getExpoUser(project.root, expoCli.cli) : undefined;
-  if (expoUser === null) {
-    log.warn('Bu bilgisayarda Expo hesabına giriş yapılmamış! iPhone bağlanamaz.');
-    log.info(`Çözüm: yeni bir terminalde ${c.cyan('npx expo login')} çalıştırın, sonra iPhone'da Expo Go > sağ üstteki profil simgesi > aynı hesapla giriş yapın.`);
-    log.info(c.dim('(Android şimdilik bundan etkilenmez. Giriş yaptıktan sonra bu aracı yeniden başlatmanıza gerek yok.)'));
+  let expoUser = loginRequired || opts.login ? await getExpoUser(project.root, expoCli.cli) : undefined;
+  if (opts.login || (expoUser === null && process.stdin.isTTY)) {
+    let wantsLogin = opts.login;
+    if (!wantsLogin) {
+      log.warn('Bu bilgisayarda Expo hesabına giriş yapılmamış! iPhone bu haliyle bağlanamaz.');
+      const answer = await ask(`Şimdi giriş yapılsın mı? ${c.dim('[E/h]')} `);
+      wantsLogin = !/^[hn]/i.test(answer);
+    }
+    if (wantsLogin) {
+      log.info(c.dim("Expo'nun giriş ekranı açılıyor. Hesabınız yoksa önce https://expo.dev/signup adresinden ücretsiz açın."));
+      runExpoAuth(project.root, expoCli.cli, 'login');
+      expoUser = await getExpoUser(project.root, expoCli.cli);
+    }
+  }
+  if (expoUser === null && loginRequired) {
+    log.warn('Expo hesabına giriş yapılmadı. iPhone bağlanamaz (Android etkilenmez).');
+    log.info(`Sonradan giriş için yeni bir terminalde ${c.cyan('npx expo login')} çalıştırın; bu aracı yeniden başlatmanıza gerek yok.`);
   } else if (expoUser) {
-    log.ok(`Expo hesabı: ${c.bold(expoUser)}  ${c.dim("(iPhone'daki Expo Go'da da bu hesapla giriş yapılmış olmalı)")}`);
+    log.ok(`Expo hesabı: ${c.bold(expoUser)}`);
+    if (loginRequired) log.info(`iPhone'da: Expo Go > sağ üstteki profil simgesi > ${c.bold(expoUser)} hesabıyla giriş yapın.`);
   }
 
   // --- ngrok modu: Expo'nun kendi tüneline aynen devret ---

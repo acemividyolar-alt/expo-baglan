@@ -56,15 +56,17 @@ Expo'nun kısayolları (`r` yenile, `j` debugger vb.) aynı terminalde normal ç
 | `expo-baglan --port 8090` | Farklı port kullanır (varsayılan 8081, doluysa sıradaki boş port) |
 | `expo-baglan --ngrok` | Cloudflare'ı hiç denemeden doğrudan Expo'nun ngrok tünelini kullanır |
 | `expo-baglan --no-browser` | Kontrol panelini otomatik açmaz |
+| `expo-baglan --login` | Başlamadan önce Expo hesabına giriş yapar / hesap değiştirir |
+| `expo-baglan --logout` | Bu bilgisayardaki Expo hesabından çıkar (lab gibi ortak bilgisayarlarda iş bitince) |
 | `expo-baglan -- --max-workers 2` | `--` sonrası her şey `expo start`'a aynen iletilir |
 
 ## Sorun giderme
 
 - **iPhone'da "You need to be signed in to Expo Go and Expo CLI" / giriş hatası**: Expo SDK 57 ile gelen kural: iPhone'daki Expo Go, bilgisayardaki Expo CLI ile **aynı Expo hesabında** oturum açılmadan projeyi açmıyor (Android şimdilik etkilenmiyor). Hesabınız yoksa [expo.dev/signup](https://expo.dev/signup) adresinden ücretsiz açın, sonra:
-  1. Bilgisayarda: `npx expo login` (kontrol: `npx expo whoami`)
-  2. iPhone'da: Expo Go > sağ üstteki profil simgesi > aynı hesapla giriş
+  1. Bilgisayarda: `expo-baglan` giriş yoksa "Şimdi giriş yapılsın mı?" diye sorar. Enter'a basıp Expo hesabınızla giriş yapın. Başka hesaba geçmek için `expo-baglan --login` kullanın.
+  2. iPhone'da: Expo Go > sağ üstteki profil simgesi > **aynı** hesapla giriş
   3. Hata ekranında *Try Again*'e basın.
-  `expo-baglan` girişi otomatik kontrol eder, giriş yoksa terminalde ve panelde uyarır.
+  Ortak bilgisayarda işiniz bitince `expo-baglan --logout` ile çıkış yapın.
 - **"Project is incompatible with this version of Expo Go"**: Telefondaki Expo Go sürümü projenin SDK sürümüyle uyuşmuyor. Kontrol panelinin sağ üstünde projenin SDK sürümü yazar. Expo Go'yu güncelleyin ya da projeyi `npx expo install expo@latest --fix` ile yükseltin.
 - **İlk açılış yavaş**: İlk seferde paketin derlenmesi 1-2 dakika sürebilir, sonraki açılışlar hızlıdır.
 - **Tünel açılamıyor / "Failed to dial a quic connection"**: Şirket ve okul ağları Cloudflare'ın 7844 portunu engelleyebilir. `expo-baglan` bu durumda önce TCP'yi dener, o da olmazsa kendiliğinden Expo'nun ngrok tüneline geçer ve gereken `@expo/ngrok` paketini kendisi kurar. Bu modda **terminalde Expo'nun bastığı QR kodunu** okutun. Ağın Cloudflare'ı engellediğini biliyorsanız ~40 sn beklememek için doğrudan `expo-baglan --ngrok` kullanın. Hiçbiri çalışmazsa bilgisayarı telefonun hotspot'una bağlayın.

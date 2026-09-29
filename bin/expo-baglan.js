@@ -8,6 +8,24 @@ const { ensureCloudflared, startQuickTunnel } = require('../src/cloudflared');
 const { findExpoProject, findLocalExpoCli, startExpo, getExpoUser } = require('../src/expo');
 const { startDashboard } = require('../src/dashboard');
 
+// Başlatılan tüm alt süreçler (cloudflared, Expo). Araç hangi yoldan kapanırsa kapansın
+// (hata, process.exit, terminal kapatma) arkada yetim cloudflared kalmasın diye öldürülür.
+const children = new Set();
+function track(child) {
+  children.add(child);
+  child.once('exit', () => children.delete(child));
+  return child;
+}
+process.on('exit', () => {
+  for (const child of children) {
+    try {
+      child.kill();
+    } catch {
+      // zaten kapanmış
+    }
+  }
+});
+
 const HELP = `
 ${c.bold('expo-baglan')} - Telefon ve bilgisayar farklı internetteyken Expo Go'ya bağlanır.
 
@@ -17,7 +35,8 @@ ${c.bold('Kullanım:')}
 ${c.bold('Seçenekler:')}
   --port <n>      Metro portu (varsayılan: 8081, doluysa sıradaki boş port)
   -c, --clear     Metro önbelleğini temizleyerek başlat
-  --ngrok         Cloudflare yerine Expo'nun kendi ngrok tünelini kullan (expo start --tunnel)
+  --ngrok         Cloudflare'ı denemeden doğrudan Expo'nun ngrok tünelini kullan (expo start --tunnel)
+                  (Cloudflare ağda engelliyse zaten otomatik olarak ngrok'a geçilir)
   --no-browser    Kontrol panelini tarayıcıda otomatik açma
   -h, --help      Bu yardımı göster
 
@@ -93,8 +112,12 @@ async function main() {
   const runWithNgrok = (port) => {
     log.info("Expo'nun ngrok tüneli kullanılıyor. Bu modda Expo'nun terminalde bastığı QR kodu doğrudur.");
     log.info(c.dim('@expo/ngrok paketini kurmak isteyip istemediğiniz sorulursa "y" yazıp Enter\'a basın.'));
-    const expo = startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra });
+    const expo = track(startExpo({ projectRoot: project.root, cli: expoCli.cli, port, useNgrok: true, clear: opts.clear, extraArgs: opts.extra }));
     expo.on('exit', (code) => process.exit(code ?? 0));
+    expo.on('error', (err) => {
+      log.error(`Expo başlatılamadı: ${err.message}`);
+      process.exit(1);
+    });
   };
 
   if (opts.ngrok) {
@@ -114,6 +137,7 @@ async function main() {
     remoteOk: false,
     error: null,
     stopped: false,
+    ngrok: false,
   };
 
   const metroPort = await findFreePort(opts.port);
@@ -125,10 +149,11 @@ async function main() {
   log.info(`Kontrol paneli: ${c.cyan(dashUrl)}`);
   if (opts.browser) openBrowser(dashUrl);
 
+  // Panel açık kalır ve kullanıcıya terminaldeki QR'ı kullanmasını söyler; araç Expo kapanınca çıkar.
   const fallBackToNgrok = (reason) => {
     log.warn(reason);
     log.warn("Expo'nun ngrok tüneline geçiliyor (443 portunu kullanır, kısıtlı ağlarda genelde açıktır)...");
-    dashboard.close();
+    state.ngrok = true;
     runWithNgrok(metroPort);
   };
 
@@ -150,7 +175,8 @@ async function main() {
   let tunnel = null;
   for (const protocol of ['http2', 'quic']) {
     log.info(`Cloudflare tüneli açılıyor (${protocol === 'http2' ? 'TCP' : 'UDP/QUIC'}, hesap gerekmez)...`);
-    tunnel = startQuickTunnel(bin, metroPort, { onLog, protocol, timeoutMs: 30000 });
+    tunnel = startQuickTunnel(bin, metroPort, { onLog, protocol, timeoutMs: 20000 });
+    track(tunnel.child);
     try {
       state.publicUrl = await tunnel.ready;
       break;
@@ -184,6 +210,7 @@ async function main() {
 
   process.on('SIGINT', () => shutdown(0));
   process.on('SIGTERM', () => shutdown(0));
+  process.on('SIGHUP', () => shutdown(0));
 
   const host = new URL(state.publicUrl).host;
   state.expoUrl = `exps://${host}`;
@@ -198,14 +225,16 @@ async function main() {
 
   log.info('Expo başlatılıyor... (dış erişim doğrulanınca buraya QR kodu basılacak)');
 
-  expo = startExpo({
-    projectRoot: project.root,
-    cli: expoCli.cli,
-    port: metroPort,
-    proxyUrl: state.publicUrl,
-    clear: opts.clear,
-    extraArgs: opts.extra,
-  });
+  expo = track(
+    startExpo({
+      projectRoot: project.root,
+      cli: expoCli.cli,
+      port: metroPort,
+      proxyUrl: state.publicUrl,
+      clear: opts.clear,
+      extraArgs: opts.extra,
+    })
+  );
   expo.on('exit', (code) => shutdown(code ?? 0));
   expo.on('error', (err) => {
     log.error(`Expo başlatılamadı: ${err.message}`);
@@ -213,12 +242,17 @@ async function main() {
   });
 
   // Durum takibi: önce yerel Metro, sonra tünel üzerinden dışarıdan erişim.
+  // Paket derlenirken tek tük zaman aşımları olabilir; durum ancak art arda 3 başarısız
+  // kontrolden sonra "kapalı" sayılır, böylece paneldeki QR kodu boşuna kaybolmaz.
+  const MAX_MISSES = 3;
   let announced = false;
+  let metroFailures = 0;
   let remoteFailures = 0;
-  let loops = 0;
+  let lastLoginCheck = Date.now();
   while (!shuttingDown) {
-    // Kullanıcı çalışırken `npx expo login` yaparsa panel güncellensin.
-    if (state.expoUser === null && ++loops % 5 === 0) {
+    // Kullanıcı çalışırken `npx expo login` yaparsa panel güncellensin (whoami ağır, 30 sn'de bir).
+    if (state.expoUser === null && Date.now() - lastLoginCheck > 30000) {
+      lastLoginCheck = Date.now();
       const user = await getExpoUser(project.root, expoCli.cli);
       if (user) {
         state.expoUser = user;
@@ -226,11 +260,15 @@ async function main() {
       }
     }
 
-    state.metroOk = await checkPackagerStatus(`http://127.0.0.1:${metroPort}`, 3000);
+    const metroNow = await checkPackagerStatus(`http://127.0.0.1:${metroPort}`, 5000);
+    metroFailures = metroNow ? 0 : metroFailures + 1;
+    state.metroOk = metroNow || (state.metroOk && metroFailures < MAX_MISSES);
+    if (!state.metroOk) state.remoteOk = false;
+
     if (state.metroOk && !state.error) {
       const ok = await checkPackagerStatus(state.publicUrl, 10000);
-      state.remoteOk = ok;
       remoteFailures = ok ? 0 : remoteFailures + 1;
+      state.remoteOk = ok || (state.remoteOk && remoteFailures < MAX_MISSES);
 
       if (ok && !announced) {
         announced = true;

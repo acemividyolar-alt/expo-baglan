@@ -10,19 +10,32 @@ const QRCode = require('qrcode');
 function startDashboard(port, getState) {
   let qrCache = { text: null, svg: null };
 
+  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+
   const server = http.createServer(async (req, res) => {
+    // DNS rebinding'e karşı: başka bir alan adı üzerinden gelen istekler tünel adresini okuyamasın.
+    if (!allowedHosts.has(req.headers.host)) {
+      res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Yasak');
+      return;
+    }
+
     const url = new URL(req.url, 'http://127.0.0.1');
 
     if (url.pathname === '/api/state') {
       const state = { ...getState() };
-      if (state.expoUrl) {
-        if (qrCache.text !== state.expoUrl) {
-          qrCache = {
-            text: state.expoUrl,
-            svg: await QRCode.toString(state.expoUrl, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
-          };
+      try {
+        if (state.expoUrl) {
+          if (qrCache.text !== state.expoUrl) {
+            qrCache = {
+              text: state.expoUrl,
+              svg: await QRCode.toString(state.expoUrl, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
+            };
+          }
+          state.qrSvg = qrCache.svg;
         }
-        state.qrSvg = qrCache.svg;
+      } catch {
+        // QR üretilemezse panel yine de adresi metin olarak gösterir.
       }
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       res.end(JSON.stringify(state));
@@ -124,7 +137,7 @@ const PAGE = /* html */ `<!doctype html>
         <li><b>iPhone:</b> Kamera uygulamasıyla kodu okutun, çıkan Expo Go bildirimine dokunun. Expo Go'da bilgisayardakiyle <i>aynı</i> Expo hesabına giriş yapmış olmalısınız (SDK 57+).</li>
         <li>QR okutamıyorsanız Expo Go'da <i>Enter URL manually</i> seçip adresi yapıştırın.</li>
       </ol>
-      <div class="note">Terminaldeki Expo QR kodu da aynı tünele gider. Bu sayfadaki kod ise bağlantının tamamını HTTPS ile kurar ve yalnızca tünel doğrulandıktan sonra görünür.</div>
+      <div class="note" id="note">Terminaldeki Expo QR kodu da aynı tünele gider. Bu sayfadaki kod ise bağlantının tamamını HTTPS ile kurar ve yalnızca tünel doğrulandıktan sonra görünür.</div>
       <p class="muted" id="footer"></p>
     </section>
   </div>
@@ -139,45 +152,62 @@ const PAGE = /* html */ `<!doctype html>
     return '<div class="pill ' + cls + '"><span class="dot"></span><span><b>' + label + '</b> ' + detail + '</span></div>';
   }
 
+  // QR alanına mesaj yazar (ölü bir QR kodunun ekranda kalmaması için).
+  function showQrMessage(html, spinner) {
+    const key = (spinner ? 'S:' : 'M:') + html;
+    if (lastQr === key) return;
+    $('qr').innerHTML = (spinner ? '<div class="spinner"></div>' : '') + '<div>' + html + '</div>';
+    lastQr = key;
+  }
+
+  function loginPill(s) {
+    if (!s.loginRequired) return '';
+    if (s.expoUser) return pill(true, 'Expo hesabı', esc(s.expoUser) + " (iPhone'da da bu hesap)");
+    if (s.expoUser === null) return pill(false, 'Expo hesabı:', 'giriş yok. iPhone için terminalde <code>npx expo login</code> çalıştırın');
+    return pill(null, 'Expo hesabı', 'kontrol edilemedi');
+  }
+
   function render(s) {
     $('project').textContent = s.projectName ? s.projectName + (s.sdkVersion ? ' · Expo ' + s.sdkVersion : '') : '';
+    $('note').hidden = !!s.ngrok;
 
-    const tunnelDetail = s.publicUrl ? 'açık' : 'açılıyor...';
+    if (s.ngrok) {
+      $('status').innerHTML =
+        pill(false, 'Cloudflare tüneli', 'bu ağda engelli') +
+        pill(true, 'ngrok tüneli', "Expo'ya devredildi") +
+        loginPill(s);
+      $('urlbox').hidden = true;
+      showQrMessage("Bu ağ Cloudflare'ı engellediği için Expo'nun ngrok tüneline geçildi.<br><br><b>Terminalde Expo'nun bastığı QR kodunu</b> okutun.<br><br><span class=\\"muted\\">@expo/ngrok kurulsun mu diye sorulursa terminalde <b>y</b> yazıp Enter'a basın.</span>");
+      $('footer').textContent = '';
+      return;
+    }
+
+    const tunnelState = s.error ? false : s.publicUrl ? true : null;
+    const tunnelDetail = s.error ? 'kapandı' : s.publicUrl ? 'açık' : 'açılıyor...';
     const metroDetail = s.metroOk ? 'çalışıyor' : 'başlatılıyor...';
     const remoteDetail = s.remoteOk ? 'internetten erişilebiliyor' : s.metroOk ? 'kontrol ediliyor...' : 'bekleniyor';
     $('status').innerHTML =
-      pill(s.publicUrl ? true : s.error ? false : null, 'Cloudflare tüneli', tunnelDetail) +
+      pill(tunnelState, 'Cloudflare tüneli', tunnelDetail) +
       pill(s.metroOk ? true : null, 'Expo (Metro)', metroDetail) +
       pill(s.remoteOk ? true : null, 'Dış erişim', remoteDetail) +
-      (s.loginRequired
-        ? s.expoUser
-          ? pill(true, 'Expo hesabı', esc(s.expoUser) + " (iPhone'da da bu hesap)")
-          : s.expoUser === null
-            ? pill(false, 'Expo hesabı:', "giriş yok. iPhone için terminalde <code>npx expo login</code> çalıştırın")
-            : pill(null, 'Expo hesabı', 'kontrol edilemedi')
-        : '') +
+      loginPill(s) +
       (s.error ? pill(false, 'Hata:', '<span class="error"></span>') : '');
     if (s.error) $('status').querySelector('.error').textContent = s.error;
 
-    if (s.expoUrl) {
-      $('urlbox').hidden = false;
-      $('url').textContent = s.expoUrl;
-    }
+    $('urlbox').hidden = !s.expoUrl || s.stopped || !!s.error;
+    if (s.expoUrl) $('url').textContent = s.expoUrl;
 
-    if (s.qrSvg && s.remoteOk) {
+    if (s.stopped) {
+      showQrMessage('Expo kapatıldı. Bu QR kodu artık geçersiz.');
+    } else if (s.qrSvg && s.remoteOk) {
       if (lastQr !== s.qrSvg) {
         $('qr').innerHTML = s.qrSvg + '<p class="muted">Expo Go ile okutun</p>';
         lastQr = s.qrSvg;
       }
     } else if (s.error) {
-      $('qr').innerHTML = '<div>Bağlantı kurulamadı. Terminaldeki mesaja bakın.</div>';
-      lastQr = null;
+      showQrMessage('Bağlantı kurulamadı. Terminaldeki mesaja bakın.');
     } else {
-      const msg = !s.publicUrl ? 'Tünel hazırlanıyor...' : !s.metroOk ? 'Expo başlatılıyor...' : 'Dış erişim kontrol ediliyor...';
-      if (lastQr !== msg) {
-        $('qr').innerHTML = '<div class="spinner"></div><div>' + msg + '</div>';
-        lastQr = msg;
-      }
+      showQrMessage(!s.publicUrl ? 'Tünel hazırlanıyor...' : !s.metroOk ? 'Expo başlatılıyor...' : 'Dış erişim kontrol ediliyor...', true);
     }
 
     $('footer').textContent = s.stopped
@@ -190,7 +220,10 @@ const PAGE = /* html */ `<!doctype html>
       const res = await fetch('/api/state', { cache: 'no-store' });
       render(await res.json());
     } catch {
-      $('footer').textContent = 'expo-baglan kapalı. Terminalde tekrar çalıştırın.';
+      $('status').innerHTML = pill(false, 'expo-baglan', 'çalışmıyor');
+      $('urlbox').hidden = true;
+      showQrMessage('expo-baglan kapalı. Bu QR kodu artık geçersiz.');
+      $('footer').textContent = 'Terminalde expo-baglan komutunu tekrar çalıştırın.';
     }
   }
 

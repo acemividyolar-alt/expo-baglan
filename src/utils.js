@@ -122,6 +122,8 @@ function checkPackagerStatus(baseUrl, timeoutMs = 8000) {
     );
     req.on('timeout', () => req.destroy());
     req.on('error', () => resolve(false));
+    // Yanıt yarıda kesilirse 'end' gelmeyebilir; durum döngüsü asılı kalmasın.
+    req.on('close', () => resolve(false));
   });
 }
 

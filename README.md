@@ -8,7 +8,7 @@ Normalde `npx expo start`, telefonun bilgisayara yerel ağ IP'si (192.168.x.x) �
 
 `expo-baglan` şunları yapar:
 
-1. **Cloudflare Quick Tunnel** açar. Ücretsizdir ve hesap gerektirmez. Bilgisayarınızdaki Metro sunucusu, `https://...trycloudflare.com` adresi üzerinden internete açılır.
+1. **Cloudflare Quick Tunnel** açar. Ücretsizdir ve hesap gerektirmez. Bilgisayarınızdaki Metro sunucusu, `https://...trycloudflare.com` adresi üzerinden internete açılır. Önce TCP, olmazsa UDP (QUIC) denenir. Ağ Cloudflare'ı tamamen engelliyorsa otomatik olarak Expo'nun ngrok tüneline geçilir.
 2. Expo'yu bu adresle başlatır (`EXPO_PACKAGER_PROXY_URL`). Böylece manifest ve JS paketi tünel üzerinden sunulur.
 3. Tünelin dışarıdan gerçekten erişilebildiğini test eder, ardından **QR kodunu** hem terminale basar hem de tarayıcıdaki kontrol panelinde gösterir.
 
@@ -40,7 +40,7 @@ VS Code'da Expo projenizi açın, terminalde:
 expo-baglan
 ```
 
-- Tarayıcıda bir kontrol paneli açılır. Üç durum göstergesi yeşil olunca QR kodu görünür.
+- Tarayıcıda bir kontrol paneli açılır. Tünel, Metro ve dış erişim göstergeleri yeşil olunca QR kodu görünür.
 - **Android:** Expo Go > *Scan QR code*
 - **iPhone:** Kamera uygulamasıyla okutun
 - QR okutamazsanız: Expo Go > *Enter URL manually* > paneldeki `exps://...` adresini yapıştırın.
@@ -54,7 +54,7 @@ Expo'nun kısayolları (`r` yenile, `j` debugger vb.) aynı terminalde normal ç
 | `expo-baglan C:\yol\projem` | Başka klasördeki projeyi başlatır |
 | `expo-baglan -c` | Metro önbelleğini temizleyerek başlatır |
 | `expo-baglan --port 8090` | Farklı port kullanır (varsayılan 8081, doluysa sıradaki boş port) |
-| `expo-baglan --ngrok` | Cloudflare yerine Expo'nun kendi ngrok tünelini kullanır |
+| `expo-baglan --ngrok` | Cloudflare'ı hiç denemeden doğrudan Expo'nun ngrok tünelini kullanır |
 | `expo-baglan --no-browser` | Kontrol panelini otomatik açmaz |
 | `expo-baglan -- --max-workers 2` | `--` sonrası her şey `expo start`'a aynen iletilir |
 
@@ -67,6 +67,6 @@ Expo'nun kısayolları (`r` yenile, `j` debugger vb.) aynı terminalde normal ç
   `expo-baglan` girişi otomatik kontrol eder, giriş yoksa terminalde ve panelde uyarır.
 - **"Project is incompatible with this version of Expo Go"**: Telefondaki Expo Go sürümü projenin SDK sürümüyle uyuşmuyor. Kontrol panelinin sağ üstünde projenin SDK sürümü yazar. Expo Go'yu güncelleyin ya da projeyi `npx expo install expo@latest --fix` ile yükseltin.
 - **İlk açılış yavaş**: İlk seferde paketin derlenmesi 1-2 dakika sürebilir, sonraki açılışlar hızlıdır.
-- **Tünel açılamıyor**: Şirket/okul ağları Cloudflare tünellerini engelleyebilir. `expo-baglan --ngrok` deneyin ya da telefonun hotspot'una bağlanın.
+- **Tünel açılamıyor / "Failed to dial a quic connection"**: Şirket ve okul ağları Cloudflare'ın 7844 portunu engelleyebilir. `expo-baglan` bu durumda önce TCP'yi dener, o da olmazsa kendiliğinden Expo'nun ngrok tüneline geçer. Expo "@expo/ngrok kurulsun mu?" diye sorarsa `y` yazıp Enter'a basın, sonra **terminalde Expo'nun bastığı QR kodunu** okutun. Hiçbiri çalışmazsa bilgisayarı telefonun hotspot'una bağlayın.
 - **Adres her seferinde değişiyor**: Hesapsız Quick Tunnel'ın doğası bu. Her başlatmada yeni QR'ı okutun.
 - **Güvenlik**: Tünel açıkken adresi bilen herkes geliştirme sunucunuza erişebilir. Adres rastgeledir ve paylaşılmadığı sürece tahmin edilmesi zordur. İşiniz bitince `Ctrl+C` ile kapatın.

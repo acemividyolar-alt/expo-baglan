@@ -16,11 +16,13 @@ Normalde `npx expo start`, telefonun bilgisayara yerel ağ IP'si (192.168.x.x) �
 
 ## Kurulum (bir kere)
 
-GitHub'dan:
+GitHub'dan (Git kurulu olması gerekmez):
 
 ```bash
-npm install -g github:acemividyolar-alt/expo-baglan
+npm install -g https://github.com/acemividyolar-alt/expo-baglan/archive/refs/heads/main.tar.gz
 ```
+
+Git kuruluysa kısa hali de olur: `npm install -g github:acemividyolar-alt/expo-baglan`
 
 Ya da indirdiğiniz `expo-baglan` klasörünün içinde terminal açıp:
 
